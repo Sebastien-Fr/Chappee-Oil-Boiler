@@ -300,9 +300,10 @@ class ApplicationWindow(QMainWindow):
         def UpdateClock():
             self.Lcdhour.display(datetime.now().strftime("%H:%M"))
             
+            
         timer = QTimer(self)
         timer.timeout.connect(lambda:UpdateClock())
-        timer.start(30000) # update every 30 second
+        timer.start(5000) # update every 30 second
             
         """ LOGO """
         self.label_17 = QtWidgets.QLabel(self.centralwidget)
@@ -373,7 +374,7 @@ class ApplicationWindow(QMainWindow):
       
         retranslateUi()
      
-        self.Go=True
+        #self.Go=True
         ##########        first start init default values         #######################
         if self.init==True:
             
@@ -381,7 +382,7 @@ class ApplicationWindow(QMainWindow):
             #if State =0  pushbutton ->ON
             self.state=[0,1,0,0]
             #[chauffage nuit,chauffage jour,ECS,Chaudiere off,Chaudiere on]
-            self.sliders=[15,19,55,83,37]
+            self.sliders=[15,19,55,79,37]
             self.Heures=['6:00','20:00','17:30','20:30']
             
             """  default hours values     """
@@ -394,7 +395,7 @@ class ApplicationWindow(QMainWindow):
             self.slidCsChaufNuit.setValue(15)
             self.slidCsChaufJour.setValue(19)
             self.slidCsECS.setValue(55)
-            self.slidCsArret.setValue(83)
+            self.slidCsArret.setValue(79)
             self.slidCsMarche.setValue(37)
             
             """ default buttons values"""
@@ -416,7 +417,7 @@ class ds18b20(threading.Thread):
       self.terminated = False
       self.Temp=[0,0,0,0]
     def run(self):
-                 
+                    time.sleep(1)
                     logger.info('Start Reading ds18B20')
                     temp=['1','2','3','4']
                     base_dir = '/sys/bus/w1/devices/'
@@ -455,7 +456,11 @@ class ds18b20(threading.Thread):
                                             temp = float(temp_string) / 1000.0
                                             # Round temp to 2 decimal points
                                             temp = round(temp, 1)
-                                        return temp
+                                            if temp>120 or temp<0:
+                                                temp2=0
+                                            else:
+                                                temp2=temp
+                                        return temp2
                                 else:
                                      get_data_points()
                                      
@@ -482,8 +487,10 @@ class Plc(threading.Thread):
           self.ordreCirculPoele=0
           self.output=[0,0,0,0,0,0,0,0]
           self.init=0
+          
       def run(self):
                 logger.info('Start PLC')
+                time.sleep(1)
                 #*******************gpio**********************
                 GPIO.setmode(GPIO.BCM)
                 #ignore les msg d'alarme 
@@ -504,6 +511,9 @@ class Plc(threading.Thread):
                 GPIO.setup(20, GPIO.OUT)
                 GPIO.setup(21, GPIO.OUT)
                 GPIO.setup(26, GPIO.OUT)
+
+                
+                
                 #####################   read input      ##################### 
                 def ReadInput():
                     add=[1,7,8,25]#adresses gpio input
@@ -522,6 +532,10 @@ class Plc(threading.Thread):
                         CirculChauff=0
                         CirculPoele=0
                         self.memo=0
+                        self.f_on=False
+                        self.f_off=False
+                        self.f_on2=False
+                        self.f_off2=False
                         self.init=1
                         
                         
@@ -557,12 +571,23 @@ class Plc(threading.Thread):
                     if ButtonMarche==True: #marche chaudiere
                         """ECS"""
                         if (ButtonEcs and Now>=CsHEcsOn and Now<=CsHEcsOff): #marche ECS
-                            if TempEcs<CsEcsOn:
+                            if TempEcs<CsEcsOn and TempEcs!= 0:
                                 self.ordreEcs=True
+                                if self.ordreEcs==True and self.f_on==False:
+                                    logger.info('OrdreECS Start '+str(TempEcs)+'°C '+str(Now))
+                                    self.f_on=True
+                                    self.f_off=False
+                                    
                             if TempEcs>CsEcsOff:
                                 self.ordreEcs=False
+                                if self.ordreEcs==False and self.f_off==False:
+                                    logger.info('OrdreECS Off '+str(TempEcs)+'°C '+str(Now))
+                                    self.f_off=True
+                                    self.f_on=False
                         else:
                             self.ordreEcs=False
+   
+                        
                         """chauffage fioul"""    
                         if (ButtonChauffage ==True and TempsHome<Cschauff): #Marche Chauffage
                             self.ordreChauffage=True
@@ -581,8 +606,17 @@ class Plc(threading.Thread):
                     """Memo 1 cycle"""
                     if TempsCorps > CsStop:  
                         self.memo =True
+                        if self.memo and not self.f_on2:
+                            logger.info('Memo cons. Stop atteinte '+str(TempsCorps)+'°C '+str(Now))
+                            self.f_on2=True
+                            self.f_off2=False
+                            
                     if TempsCorps < CsEcsOn:
                         self.memo= False
+                        if self.memo and not self.f_off2:
+                            logger.info('Memo cons. Start atteinte '+str(TempsCorps)+'°C '+str(Now))
+                            self.f_off2=True
+                            self.f_on2=False
                       
     
                     """  POST """
@@ -594,6 +628,7 @@ class Plc(threading.Thread):
                     time.sleep(1)
                     """Sorties"""
                     self.output=[SousTension,CirculECS,CirculChauff,CirculPoele,0,0,0,0]
+                    
                     if self.output[0]==True:
                             application.label_20.setStyleSheet('color: green')
                     else:
@@ -627,6 +662,7 @@ class Plc(threading.Thread):
                         Input=ReadInput()#lit les entrees
                         Output=MainCode(Input)#code principal
                         WriteOutput(Output)#ecrit les sorties
+                        #print (Output)
                         time.sleep(0.01)#Pause
                  
                 except KeyboardInterrupt:
@@ -643,7 +679,8 @@ class modbus(threading.Thread):
       self.nom=nom
       self.terminated = False
     
-    def run(self): 
+    def run(self):
+            time.sleep(2) 
             logger.info('Start Modbus')
             """**************declare le nb de mots ***********************"""
             store = ModbusSlaveContext(
@@ -664,10 +701,11 @@ class modbus(threading.Thread):
                 register = 3
                 slave_id = 0
                 address  = 10 # mot w10 
-                values = [(int (onewire.Temp[0]*10)),(int(onewire.Temp[1]*10)),(int(onewire.Temp[2]*10)),api.output[0],
-                          api.output[1],api.output[2],api.output[3]]
+                values = [(int (onewire.Temp[0]*10)),(int(onewire.Temp[1]*10)),(int(onewire.Temp[2]*10)),(int(onewire.Temp[3]*10)),(int(api.output[0])),
+                          (int(api.output[1])),(int(api.output[2])),(int(api.output[3]))]
                   
                 context[slave_id].setValues(register,address,values)
+                #print (values)
             """*********lit les valeurs du module modbus ************************"""
             def read_context(a):
                  context  = a[0]
@@ -692,19 +730,33 @@ class systeme(threading.Thread):
       self.nom=nom
       self.terminated = True
     def run(self):
+                    time.sleep(3)
                     logger.info('sys')
+                    listestr=['','','','','','','','','','','','',]
+                    threads=['MainThread','ds18b20','Plc','modbus','systeme']#,if run with idle'SockThread']
+                    
+                    time.sleep(5)
+                    #enumere les threads alive
                     while True:
+                        output_list=[]
                         liste=threading.enumerate()
-                        #print (liste)
                         if liste != []:
                             Nb=len(liste)
-                            if Nb!= 6:
+                            nb=len(threads)
+                            #test si tous les threads sont vivants
+                            if Nb< 5:
                                 application.label_18.setStyleSheet('color: red')
                                 logger.info('all threads are not started Nb:'+str(Nb))
                                 for i in range (0,Nb):
-                                    #print (liste[i])
-                                    logger.info(liste[i])
-  
+                                     listestr[i]=(str(liste[i]))   
+                                for j in range (0,Nb):
+                                    for k in range (0,nb):
+                                        thread= listestr[j].find(threads[k])
+                                        if thread != -1:
+                                            output_list.append(threads[k])
+                                #print(output_list)
+                                #print(set(threads).difference(set(output_list)))
+                                logger.info ((set(threads).difference(set(output_list))))            
                             else:
                                 application.label_18.setStyleSheet('color: green')
                         time.sleep(5)
@@ -719,21 +771,22 @@ if __name__ == '__main__':
     surveillance=systeme()
     api=Plc()
     mod = modbus()
+    """Temp""" 
+    onewire.start()
+    """sys"""
+    surveillance.start()
+    """PLC"""
+    api.start()
+    """Modbus"""
+    mod.start()
+    """prevent freeze"""
+    QtCore.QCoreApplication.processEvents()
     """Gui"""
     # create pyqt5 app 
     app = QApplication(sys.argv)
     # create the instance of our Window 
     application = ApplicationWindow()
     # start the app
-    if application.Go == True:
-        """Temp""" 
-        onewire.start()
-        """sys"""
-        surveillance.start()
-        """PLC"""
-        api.start()
-        """Modbus"""
-        mod.start()
     sys.exit(app.exec_())
 
 
