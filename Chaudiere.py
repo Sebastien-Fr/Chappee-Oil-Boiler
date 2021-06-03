@@ -604,19 +604,31 @@ class Plc(threading.Thread):
                         self.ordreCirculPoele=False
                         
                     """Memo 1 cycle"""
+                    if (TempEcs < CsEcsOff) and (TempsCorps < CsEcsOn) :
+                        self.memo= False
+                        if self.f_on2 == False:
+                           logger.info('Memo cons. Start atteinte '+str(TempsCorps)+'°C '+str(Now))
+                           self.f_on2 = True
+                            
+                            
                     if TempsCorps > CsStop:  
+                        self.memo =True
+                        if self.f_on2 == True:
+                            logger.info('Memo cons. Stop atteinte '+str(TempsCorps)+'°C '+str(Now))
+                            self.f_on2 = False
+                    """if TempsCorps > CsStop:  
                         self.memo =True
                         if self.memo and not self.f_on2:
                             logger.info('Memo cons. Stop atteinte '+str(TempsCorps)+'°C '+str(Now))
                             self.f_on2=True
                             self.f_off2=False
                             
-                    if TempsCorps < CsEcsOn:
+                    if TempEcs < CsEcsOn:
                         self.memo= False
-                        if self.memo and not self.f_off2:
+                        if not self.memo and not self.f_off2:
                             logger.info('Memo cons. Start atteinte '+str(TempsCorps)+'°C '+str(Now))
                             self.f_off2=True
-                            self.f_on2=False
+                            self.f_on2=False"""
                       
     
                     """  POST """
@@ -759,6 +771,8 @@ class systeme(threading.Thread):
                                 logger.info ((set(threads).difference(set(output_list))))            
                             else:
                                 application.label_18.setStyleSheet('color: green')
+
+                        QtCore.QCoreApplication.processEvents()
                         time.sleep(5)
                         
     def stop(self):
