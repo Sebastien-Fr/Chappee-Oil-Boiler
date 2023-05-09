@@ -382,11 +382,11 @@ class ApplicationWindow(QMainWindow):
             #if State =0  pushbutton ->ON
             self.state=[0,1,0,0]
             #[chauffage nuit,chauffage jour,ECS,Chaudiere off,Chaudiere on]
-            self.sliders=[15,19,55,79,37]
-            self.Heures=['6:00','20:00','17:30','20:30']
+            self.sliders=[15,20,55,83,38]
+            self.Heures=['6:00','20:00','8:30','20:30']
             
             """  default hours values     """
-            self.timeECSDeb.setTime(QTime(18,30))
+            self.timeECSDeb.setTime(QTime(9,30))
             self.timeECSFin.setTime(QTime(20,30))
             self.timeChauffJour.setTime(QTime(6,30))
             self.timeChauffNuit.setTime(QTime(20,00))
@@ -395,8 +395,8 @@ class ApplicationWindow(QMainWindow):
             self.slidCsChaufNuit.setValue(15)
             self.slidCsChaufJour.setValue(19)
             self.slidCsECS.setValue(55)
-            self.slidCsArret.setValue(79)
-            self.slidCsMarche.setValue(37)
+            self.slidCsArret.setValue(85)
+            self.slidCsMarche.setValue(38)
             
             """ default buttons values"""
             self.WriteState("ECS")
@@ -457,7 +457,7 @@ class ds18b20(threading.Thread):
                                             # Round temp to 2 decimal points
                                             temp = round(temp, 1)
                                             if temp>120 or temp<0:
-                                                temp2=0
+                                                temp2=100
                                             else:
                                                 temp2=temp
                                         return temp2
@@ -532,6 +532,7 @@ class Plc(threading.Thread):
                         CirculChauff=0
                         CirculPoele=0
                         self.memo=0
+                        self.memo2=0
                         self.f_on=False
                         self.f_off=False
                         self.f_on2=False
@@ -550,6 +551,7 @@ class Plc(threading.Thread):
                     TempsRes=onewire.Temp[2]
                     TempsCorps=onewire.Temp[3]
                     TempsHome=onewire.Temp[1]
+            
                     #Hours
                     CsHEcsOn= datetime.strptime(self.Heures[0], "%H:%M").strftime("%H:%M")
                     CsHEcsOff=datetime.strptime(self.Heures[1], "%H:%M").strftime("%H:%M")
@@ -562,31 +564,24 @@ class Plc(threading.Thread):
                     CsEcsOff=self.Sliders[2]
                     CsStop=self.Sliders[3]
                     CsEcsOn=self.Sliders[4]
+                    
                     """consigne chauff"""
                     if Now >= CsHChJour and Now < CsHChNuit :
                        Cschauff=CsChauffJ
                     else:
                        Cschauff=CsChauffN
+                       
                     """mise sous tension """
                     if ButtonMarche==True: #marche chaudiere
                         """ECS"""
                         if (ButtonEcs and Now>=CsHEcsOn and Now<=CsHEcsOff): #marche ECS
-                            if TempEcs<CsEcsOn and TempEcs!= 0:
+                            if TempEcs<CsEcsOff and TempEcs!= 0:
                                 self.ordreEcs=True
-                                if self.ordreEcs==True and self.f_on==False:
-                                    logger.info('OrdreECS Start '+str(TempEcs)+'°C '+str(Now))
-                                    self.f_on=True
-                                    self.f_off=False
-                                    
-                            if TempEcs>CsEcsOff:
+                                
+                            if TempEcs>CsEcsOff:#Temp atteinte
                                 self.ordreEcs=False
-                                if self.ordreEcs==False and self.f_off==False:
-                                    logger.info('OrdreECS Off '+str(TempEcs)+'°C '+str(Now))
-                                    self.f_off=True
-                                    self.f_on=False
                         else:
                             self.ordreEcs=False
-   
                         
                         """chauffage fioul"""    
                         if (ButtonChauffage ==True and TempsHome<Cschauff): #Marche Chauffage
@@ -603,43 +598,39 @@ class Plc(threading.Thread):
                     else:
                         self.ordreCirculPoele=False
                         
-                    """Memo 1 cycle"""
-                    if (TempEcs < CsEcsOff) and (TempsCorps < CsEcsOn) :
+                    """Memo 1 cycle ecs"""
+                    if ((TempEcs > CsEcsOff) and not self.ordreChauffage) or (TempsCorps > CsStop) :#stop
                         self.memo= False
                         if self.f_on2 == False:
-                           logger.info('Memo cons. Start atteinte '+str(TempsCorps)+'°C '+str(Now))
                            self.f_on2 = True
-                            
-                            
-                    if TempsCorps > CsStop:  
+                                     
+                    if TempEcs < CsEcsOn: #start 
                         self.memo =True
                         if self.f_on2 == True:
-                            logger.info('Memo cons. Stop atteinte '+str(TempsCorps)+'°C '+str(Now))
-                            self.f_on2 = False
-                    """if TempsCorps > CsStop:  
-                        self.memo =True
-                        if self.memo and not self.f_on2:
-                            logger.info('Memo cons. Stop atteinte '+str(TempsCorps)+'°C '+str(Now))
-                            self.f_on2=True
-                            self.f_off2=False
-                            
-                    if TempEcs < CsEcsOn:
-                        self.memo= False
-                        if not self.memo and not self.f_off2:
-                            logger.info('Memo cons. Start atteinte '+str(TempsCorps)+'°C '+str(Now))
-                            self.f_off2=True
-                            self.f_on2=False"""
-                      
-    
-                    """  POST """
-                    SousTension= (self.ordreEcs or self.ordreChauffage) and TempsCorps < CsStop and not self.memo
-                    CirculECS=self.ordreEcs
-                    CirculChauff=self.ordreChauffage and not self.ordreEcs #priorité ECS
-                    CirculPoele=self.ordreCirculPoele and not ButtonChauffage #Priorité Chauff fioul
+                           self.f_on2 = False
                     
+                    
+                    """Memo 1 cycle chauffage"""
+                    if not self.ordreChauffage or (TempsCorps > CsStop) :#stop
+                        self.memo2= False
+                        
+                    if TempsRes < CsEcsOn and self.ordreChauffage: #start 
+                        self.memo2 =True
+         
+                    """  POST """
+                    SousTension= ((self.ordreEcs and  self.memo) or (self.ordreChauffage and self.memo2)) and TempsCorps < CsStop  
+                    CirculECS=self.ordreEcs and TempsCorps > TempEcs+1
+                    CirculChauff=self.ordreChauffage and not self.ordreEcs #priorité ECS
+                    CirculPoele=self.ordreCirculPoele #and not self.ordreChauffage and not CirculChauff#Priorité Chauff fioul
                     time.sleep(1)
+                    
+                    """debug"""
+                    print('TempEcs:',TempEcs, ' TempsRes:',TempsRes,' TempsCorps:',TempsCorps,' CirculPoele:',CirculPoele,' CirculChauff:',CirculChauff,' CirculECS:',CirculECS,' SousTension:',SousTension)
+                    #print(TempEcs , CsEcsOff ,CsEcsOn,TempsRes,TempsCorps,CsStop,self.memo,self.memo2,CirculPoele,CirculChauff,CirculECS,SousTension)
+                    
                     """Sorties"""
                     self.output=[SousTension,CirculECS,CirculChauff,CirculPoele,0,0,0,0]
+                    #print (self.output)
                     
                     if self.output[0]==True:
                             application.label_20.setStyleSheet('color: green')
